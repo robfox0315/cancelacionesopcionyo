@@ -234,7 +234,7 @@ def load_treble_cancelaciones():
             st.stop()
         df = df_full[df_full["tag"] == "cancelaciones"].copy()
 
-    for c in ["created_at", "assigned_at", "finished_at", "agent_first_message", "last_message"]:
+    for c in ["created_at", "finished_at"]:
         if c in df.columns:
             df[c] = pd.to_datetime(df[c], errors="coerce", format="mixed")
 
@@ -244,15 +244,28 @@ def load_treble_cancelaciones():
     df["hora"] = df["created_at"].dt.hour
     df["dia_nombre"] = df["created_at"].dt.day_name()
 
-    # Tiempo de atención (respuesta): del momento asignado al primer mensaje del agente.
-    # Mismo patrón que "TPR" en el dashboard ATC (dashboard_atc_v2.py, tab Tiempo de Respuesta).
-    df["tpr_min"] = (df["agent_first_message"] - df["assigned_at"]).dt.total_seconds() / 60
-    df.loc[df["tpr_min"] < 0, "tpr_min"] = np.nan
+    # Tiempo de atención (respuesta): calculado en el DWH (fact_conversations +
+    # fact_redirections + fact_agent_messages), no en este script.
+    #   - Chats directos: first_response_sec de fact_conversations (asignación → 1er mensaje).
+    #   - Chats transferidos desde ATC (CORRECCIÓN reportada por Iva, el mismo problema del
+    #     Looker Studio donde el agente que cierra se queda con el tiempo de quien transfirió):
+    #     se mide desde la última transferencia hacia Cancelaciones (fact_redirections) hasta
+    #     el primer mensaje de un agente DESPUÉS de esa transferencia (fact_agent_messages,
+    #     sender='AGENT'), nunca desde la asignación original.
+    # "es_transferido" y "tpr_min" ya vienen calculados en el CSV (columnas tpr_min /
+    # es_transferido). Se limpian solo valores imposibles como salvaguarda.
+    if "tpr_min" not in df.columns:
+        df["tpr_min"] = np.nan
+    df.loc[(df["tpr_min"] < 0) | (df["tpr_min"] > 7 * 24 * 60), "tpr_min"] = np.nan
+    if "es_transferido" not in df.columns:
+        df["es_transferido"] = False
+    df["es_transferido"] = df["es_transferido"].astype(bool)
 
     # Duración total del caso (creación -> cierre) — incluye tiempos muertos entre mensajes,
     # es la "carga" total del caso, no el tiempo activo de atención. Se muestran ambas métricas
     # por separado para no mezclar "tiempo de respuesta" con "duración total abierto".
-    df["duracion_total_min"] = (df["finished_at"] - df["created_at"]).dt.total_seconds() / 60
+    if "duracion_total_min" not in df.columns:
+        df["duracion_total_min"] = (df["finished_at"] - df["created_at"]).dt.total_seconds() / 60
     df.loc[df["duracion_total_min"] < 0, "duracion_total_min"] = np.nan
 
     df["labels"] = df["labels"].fillna("")
@@ -390,6 +403,7 @@ with tab1:
     tpr_prom = tpr_v.mean() if len(tpr_v) else np.nan
     tpr_med = tpr_v.median() if len(tpr_v) else np.nan
     tpr_p90 = tpr_v.quantile(.90) if len(tpr_v) else np.nan
+    n_transferidos = int(tb["es_transferido"].sum())
 
     st.markdown('<div class="sec">📊 KPIs principales — Chats (Treble)</div>', unsafe_allow_html=True)
     st.markdown('<div class="kpi-grid">' +
@@ -400,6 +414,12 @@ with tab1:
         kpi("Mediana", fmt_min(tpr_med), "más robusto a outliers", kind="dark") +
         kpi("P90", fmt_min(tpr_p90), "9 de 10 casos ≤ este valor", kind="dark") +
         '</div>', unsafe_allow_html=True)
+    st.caption(
+        f"⏱️ Tiempo de atención medido desde el DWH: en chats transferidos desde ATC se mide desde la "
+        f"transferencia (no desde la asignación original), corrigiendo el problema reportado por Iva. "
+        f"{n_transferidos:,} de {n_chats_totales:,} chats ({safe_pct(n_transferidos, n_chats_totales)}%) "
+        f"llegaron transferidos."
+    )
 
     st.markdown('<div class="sec blue">💰 KPIs principales — Resultado financiero (HubSpot / tickets FID)</div>',
                 unsafe_allow_html=True)
@@ -445,6 +465,7 @@ with tab1:
 # ────────────────────────────────────────────────────────────────
 with tab2:
     st.markdown('<div class="sec">⏱️ Contexto de carga operativa</div>', unsafe_allow_html=True)
+    st.caption("Tiempo de atención corregido: en transferidos se mide desde la transferencia a Cancelaciones.")
 
     meses_disp = sorted(tb["mes"].dropna().unique(), reverse=True)
     if len(meses_disp) >= 2:
@@ -592,10 +613,12 @@ with tab3:
 # ────────────────────────────────────────────────────────────────
 with tab4:
     st.markdown('<div class="sec">🏆 Rendimiento por agente — operativo + financiero</div>', unsafe_allow_html=True)
-    st.caption("🔸 = muestra pequeña (menos de 15 casos en el rango seleccionado).")
+    st.caption("🔸 = muestra pequeña (menos de 15 casos en el rango seleccionado). "
+               "Tiempo de atención incluye chats transferidos, medido desde la transferencia.")
 
     op_ag = tb.groupby("agent").agg(
         Casos_chat=("phone", "size"),
+        Casos_transferidos=("es_transferido", "sum"),
         Tiempo_medio=("tpr_min", "mean"),
         Tiempo_mediana=("tpr_min", "median"),
         Tiempo_P90=("tpr_min", lambda x: x.quantile(.90)),
