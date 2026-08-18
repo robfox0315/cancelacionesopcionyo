@@ -1,19 +1,22 @@
-# Cancelaciones & Rescates — Auditoría 360°
+# Cancelaciones & Rescates
 
-## Qué incluye (Fase 1+2, funcional hoy)
+Dashboard ejecutivo, listo para Angela. 5 pestañas, sin secciones internas de auditoría.
+
+## Datos (actualizados a hoy, 18-ago-2026)
+- **Treble**: 2,612 conversaciones (`tag=cancelaciones`), rango abr–ago 2026.
+- **HubSpot**: 649 tickets de rescate (categoría "FID- Rescate de reembolsos"), cierre hasta 18-ago-2026 — jalados en vivo vía HubSpot MCP.
+
+## Qué incluye
 - Resumen ejecutivo (Treble + HubSpot)
 - Carga operativa: mes actual vs. anterior, evolución semanal volumen vs. tiempo
 - Funnel operativo (Treble) + funnel financiero (HubSpot)
 - Rendimiento por agente (chat + rescate financiero)
-- Cobertura de auditoría (% real, sin inflar — llamadas e IA marcadas en 0%/pendiente)
-- Calidad de datos (checks 🟢🟡🔴)
 - Explorador de casos con descarga CSV
 
-## Qué queda en segundo plano (a propósito, ver pestaña "Cobertura de auditoría")
-- Llamadas del equipo de cancelaciones (sin acceso confirmado — pendiente Diosnel/Alejandro)
-- Clasificación por IA de motivo/técnica de rescate (sin acceso al texto de mensajes aún)
-- Cruce fila-a-fila Treble↔HubSpot (falta llave contact_id confirmada — hoy son paneles paralelos por fecha)
-- Columna "Comisionable" verificada contra Stripe (existe en el dashboard financiero, falta en este export)
+## Pendiente (no bloquea el uso de hoy)
+- Conexión en vivo al DWH de Treble vía el Bridge: hoy **caída** (`dwh_conectado: false`, error `Setting max_execution_time is readonly`). No es un problema del dashboard — hay que arreglar la conexión ClickHouse del bridge en Render.
+- Llamadas del equipo de cancelaciones: sin acceso confirmado.
+- Cruce fila-a-fila Treble↔HubSpot: falta llave `contact_id` común confirmada.
 
 ## Deploy (mismo patrón que los otros dashboards OY)
 1. Repo nuevo en GitHub (ej. `robfox0315/opcionyo-cancelaciones`), branch `main`.

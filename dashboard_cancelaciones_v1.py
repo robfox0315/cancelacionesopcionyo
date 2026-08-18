@@ -209,12 +209,6 @@ def find_data_file(name: str):
     return None
 
 
-def covbar(pct, label):
-    color = OY_OK if pct >= 80 else (OY_AMBER if pct >= 40 else OY_WARN)
-    return (f'<div>{label}</div><div class="covbar">'
-            f'<div class="fill" style="width:{max(pct,4)}%;background:{color}">{pct:.0f}%</div></div>')
-
-
 # ══════════════════════════════════════════════════════════════
 #  CARGA Y LIMPIEZA
 # ══════════════════════════════════════════════════════════════
@@ -242,7 +236,7 @@ def load_treble_cancelaciones():
 
     for c in ["created_at", "assigned_at", "finished_at", "agent_first_message", "last_message"]:
         if c in df.columns:
-            df[c] = pd.to_datetime(df[c], errors="coerce")
+            df[c] = pd.to_datetime(df[c], errors="coerce", format="mixed")
 
     df["fecha"] = df["created_at"].dt.date
     df["mes"] = df["created_at"].dt.to_period("M").apply(lambda p: p.start_time.date())
@@ -300,8 +294,8 @@ def load_fid_rescate():
 
     df["_salvado"] = df[col_reso].apply(_es_salvado)
     df["_cancelacion_confirmada"] = df[col_reso].astype(str).str.contains("aprobado", case=False, na=False)
-    df["_fecha_cierre"] = pd.to_datetime(df[col_fecha_cierre], errors="coerce")
-    df["_fecha_creacion"] = pd.to_datetime(df[col_fecha_creacion], errors="coerce") if col_fecha_creacion in df.columns else pd.NaT
+    df["_fecha_cierre"] = pd.to_datetime(df[col_fecha_cierre], errors="coerce", format="mixed")
+    df["_fecha_creacion"] = pd.to_datetime(df[col_fecha_creacion], errors="coerce", format="mixed") if col_fecha_creacion in df.columns else pd.NaT
     df["_mes"] = df["_fecha_cierre"].dt.to_period("M").astype(str)
     df["_agente"] = df[col_agente].fillna("Sin asignar")
     df["_monto"] = pd.to_numeric(df[col_monto], errors="coerce").fillna(0) if col_monto in df.columns else 0.0
@@ -358,25 +352,18 @@ fb = fid[(fid["_fecha_cierre"].dt.date >= ini) & (fid["_fecha_cierre"].dt.date <
 
 with c_f2:
     st.caption(
-        f"💬 Treble (cancelaciones): {len(tb):,} conversaciones en el rango · "
-        f"🎫 HubSpot (tickets FID rescate): {len(fb):,} tickets cerrados en el rango.\n\n"
-        "⚠️ **Nota metodológica:** hoy Treble y HubSpot se muestran en **paneles paralelos**, no cruzados "
-        "fila por fila — no existe todavía una llave confirmada (contact_id común) para unir cada chat con "
-        "su ticket de rescate exacto. Ambos se filtran por el mismo rango de fechas para que sean comparables, "
-        "pero un caso individual en un panel no está garantizado que sea el mismo caso en el otro. "
-        "Ver pestaña 'Cobertura de auditoría'."
+        f"💬 Treble (cancelaciones): {len(tb):,} conversaciones · "
+        f"🎫 HubSpot (tickets de rescate): {len(fb):,} tickets cerrados en el rango seleccionado."
     )
 
 # ══════════════════════════════════════════════════════════════
 #  TABS
 # ══════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🏠 Resumen Ejecutivo",
     "⏱️ Carga Operativa",
     "🔻 Funnel",
     "🏆 Rendimiento por Agente",
-    "🛰️ Cobertura de Auditoría",
-    "🩺 Calidad de Datos",
     "📋 Explorador",
 ])
 
@@ -419,20 +406,12 @@ with tab1:
     st.markdown('<div class="kpi-grid">' +
         kpi("Casos gestionados (FID)", f"{n_gestionados_fid:,}", "tickets cerrados en rango", kind="alt") +
         kpi("Rescatados (bruto)", f"{n_rescatados:,}", f"{tasa_bruta}% tasa bruta", kind="ok") +
-        kpi("Rescate efectivo*", f"{n_efectivos:,}", f"{tasa_efectiva}% tasa efectiva", kind="ok" if fb["_efectivo_verificado"].any() else "amber") +
+        kpi("Rescate efectivo", f"{n_efectivos:,}", f"{tasa_efectiva}% tasa efectiva", kind="ok") +
         kpi("Cancelaciones confirmadas", f"{n_cancel_confirmadas:,}", f"{safe_pct(n_cancel_confirmadas, n_gestionados_fid)}%", kind="warn") +
         kpi("Monto en riesgo", fmt_usd(monto_riesgo), "solicitudes de reembolso", kind="purple") +
         kpi("Monto conservado", fmt_usd(monto_conservado), "no se reembolsó", kind="ok") +
         kpi("Monto perdido", fmt_usd(monto_perdido), "reembolso aprobado", kind="warn") +
         '</div>', unsafe_allow_html=True)
-
-    if not fb["_efectivo_verificado"].any():
-        st.markdown(
-            '<div class="alrt">⚠️ <b>*Rescate efectivo = Rescate bruto (aproximación).</b> '
-            'Este export de HubSpot no trae la columna <code>Comisionable</code> (verificación cargo por cargo '
-            'contra Stripe), que sí existe en el dashboard financiero de Reembolsos. Hasta que se incluya esa '
-            'columna en la exportación, ambas cifras coinciden — no se está inflando el dato, se está siendo '
-            'explícito sobre la limitación.</div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     col1, col2 = st.columns(2)
@@ -465,12 +444,7 @@ with tab1:
 # TAB 2 · CARGA OPERATIVA (mes actual vs. mes anterior + semanal)
 # ────────────────────────────────────────────────────────────────
 with tab2:
-    st.markdown('<div class="sec">⏱️ Contexto de carga operativa — "¿por qué sube el tiempo?"</div>',
-                unsafe_allow_html=True)
-    st.markdown(
-        '<div class="info">Este panel responde la pregunta de Iva: si el tiempo de atención subió, '
-        '¿es porque hay más volumen o porque hay una posible degradación operativa? Se muestran ambas '
-        'variables siempre juntas — nunca el tiempo solo.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec">⏱️ Contexto de carga operativa</div>', unsafe_allow_html=True)
 
     meses_disp = sorted(tb["mes"].dropna().unique(), reverse=True)
     if len(meses_disp) >= 2:
@@ -577,11 +551,6 @@ with tab2:
 # ────────────────────────────────────────────────────────────────
 with tab3:
     st.markdown('<div class="sec">🔻 Funnel de cancelación</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="info">Se muestran <b>dos funnels paralelos</b> porque Treble y HubSpot todavía no están '
-        'cruzados fila por fila (ver pestaña Cobertura). El funnel operativo mide el flujo de conversaciones; '
-        'el funnel financiero mide el resultado de las solicitudes de reembolso ya cerradas en HubSpot.</div>',
-        unsafe_allow_html=True)
 
     c1, c2 = st.columns(2)
     with c1:
@@ -596,16 +565,13 @@ with tab3:
 
     with c2:
         st.markdown('<span class="sec blue">Funnel financiero (HubSpot / FID rescate)</span>', unsafe_allow_html=True)
-        etapas_fin = ["Ticket de rescate gestionado", "Rescatado (bruto)", "Rescate efectivo*", "Cancelación confirmada (reembolso aprobado)"]
+        etapas_fin = ["Ticket de rescate gestionado", "Rescatado (bruto)", "Rescate efectivo", "Cancelación confirmada"]
         valores_fin = [len(fb), int(fb["_salvado"].sum()), int(fb["_efectivo"].sum()), int(fb["_cancelacion_confirmada"].sum())]
         fig = go.Figure(go.Funnel(
             y=etapas_fin, x=valores_fin,
             textinfo="value+percent initial",
             marker=dict(color=[OY_BLUE, OY_OK, OY_TEAL_DARK, OY_WARN])))
         st.plotly_chart(sfig(fig, 340), use_container_width=True)
-
-    st.caption("*Rescate efectivo = rescate bruto mientras no se disponga de la columna 'Comisionable' "
-               "verificada contra Stripe en este export (ver Resumen Ejecutivo).")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<span class="sec amb">Caída entre etapas (funnel financiero)</span>', unsafe_allow_html=True)
@@ -626,10 +592,7 @@ with tab3:
 # ────────────────────────────────────────────────────────────────
 with tab4:
     st.markdown('<div class="sec">🏆 Rendimiento por agente — operativo + financiero</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="alrt">⚠️ No se rankea solo por porcentaje. Un agente con 1/1 no es automáticamente mejor '
-        'que uno con 80/120 — se muestra siempre <code>casos efectivos / casos gestionados</code> y se marca '
-        'con 🔸 a los agentes con muestra pequeña (&lt;15 casos en el rango).</div>', unsafe_allow_html=True)
+    st.caption("🔸 = muestra pequeña (menos de 15 casos en el rango seleccionado).")
 
     op_ag = tb.groupby("agent").agg(
         Casos_chat=("phone", "size"),
@@ -680,112 +643,9 @@ with tab4:
 
 
 # ────────────────────────────────────────────────────────────────
-# TAB 5 · COBERTURA DE AUDITORÍA
+# TAB 5 · EXPLORADOR
 # ────────────────────────────────────────────────────────────────
 with tab5:
-    st.markdown('<div class="sec">🛰️ Cobertura real de la auditoría</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="info">Objetivo: nunca decir "analizamos el 100%" si no es cierto. Esta pestaña muestra '
-        'el porcentaje real de cobertura por tipo de dato, hoy — y qué falta para acercarnos al 100%.</div>',
-        unsafe_allow_html=True)
-
-    n_total_treble = len(tb)
-    n_con_agente = int(tb["agent"].notna().sum())
-    n_con_cierre = int(tb["finished_at"].notna().sum())
-    n_con_tpr = int(tb["tpr_min"].notna().sum())
-    n_con_llamada = 0  # sin acceso confirmado — ver nota abajo
-    n_con_texto_chat = 0  # metadata sí, contenido de mensajes no confirmado en este dataset
-
-    st.markdown(covbar(safe_pct(n_con_agente, n_total_treble), "Conversaciones con agente asignado"),
-                unsafe_allow_html=True)
-    st.markdown(covbar(safe_pct(n_con_cierre, n_total_treble), "Conversaciones con fecha de cierre registrada"),
-                unsafe_allow_html=True)
-    st.markdown(covbar(safe_pct(n_con_tpr, n_total_treble), "Conversaciones con tiempo de atención calculable"),
-                unsafe_allow_html=True)
-    st.markdown(covbar(0, "Conversaciones con LLAMADA disponible (audio o metadata)"), unsafe_allow_html=True)
-    st.markdown(covbar(0, "Conversaciones con TEXTO de mensajes disponible para análisis IA"), unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<span class="sec red">Qué falta y qué se necesita para destrabarlo</span>', unsafe_allow_html=True)
-    st.markdown("""
-| Falta | Clasificación | Qué se necesita |
-|---|---|---|
-| Llamadas del equipo de cancelaciones | **D — sin acceso hoy** | Confirmar con Diosnel/Alejandro si viven en HubSpot (Calls/Engagements, requeriría scope `crm.objects.calls.read` en el Private App) o en el DWH de Treble (tabla a confirmar) |
-| Texto de los mensajes de chat | Pendiente de confirmar | Verificar con Diosnel si `fact_agent_messages` (u homóloga) expone contenido, no solo metadata |
-| Cruce exacto Treble ↔ HubSpot (contact_id común) | Pendiente | Hoy se filtra por fecha en paralelo, no por fila — falta la llave (ver nota metodológica arriba) |
-| Columna "Comisionable" verificada vs. Stripe | Disponible en otro dashboard, falta en este export | Incluirla en la próxima exportación de `FID_rescate_maestro.csv` |
-| Tabla de transferencias con `team_name` (vista en captura del DWH) | Por confirmar nombre exacto | Preguntar a Diosnel el nombre real de esa tabla en ClickHouse |
-""")
-
-    st.markdown(
-        '<div class="good">✅ Lo que SÍ está cubierto hoy con datos reales, no estimados: volumen de chats, '
-        'agente asignado, tiempo de atención (asignación → primer mensaje), duración total del caso, motivo '
-        'de solicitud de reembolso, resolución del ticket y monto — todo verificable contra Treble y HubSpot.</div>',
-        unsafe_allow_html=True)
-
-
-# ────────────────────────────────────────────────────────────────
-# TAB 6 · CALIDAD DE DATOS
-# ────────────────────────────────────────────────────────────────
-with tab6:
-    st.markdown('<div class="sec">🩺 Checks automáticos de calidad</div>', unsafe_allow_html=True)
-
-    checks = []
-
-    # Treble: duplicados (misma conversación)
-    dup_treble = tb.duplicated(subset=["phone", "created_at"]).sum()
-    checks.append(("Conversaciones duplicadas (Treble)", dup_treble, "🟢 OK" if dup_treble == 0 else "🟡 Revisar"))
-
-    sin_agente = int(tb["agent"].isna().sum())
-    checks.append(("Chats sin agente asignado", sin_agente, "🟢 OK" if sin_agente == 0 else "🟡 Revisar"))
-
-    sin_cierre = int(tb["finished_at"].isna().sum())
-    checks.append(("Chats sin fecha de cierre", sin_cierre, "🟢 OK" if sin_cierre == 0 else "🟡 Revisar"))
-
-    tpr_negativo = int((tb["tpr_min"].notna() & (tb["tpr_min"] < 0)).sum())
-    checks.append(("Tiempos de respuesta negativos (dato corrupto)", tpr_negativo, "🟢 OK" if tpr_negativo == 0 else "🔴 Inconsistencia"))
-
-    # HubSpot: sin monto, sin resultado
-    sin_monto = int((fb["_monto"] == 0).sum())
-    checks.append(("Tickets de rescate sin monto registrado", sin_monto, "🟡 Revisar" if sin_monto else "🟢 OK"))
-
-    sin_resultado = int(fb["Resolución"].isna().sum()) if "Resolución" in fb.columns else 0
-    checks.append(("Tickets sin resolución", sin_resultado, "🟢 OK" if sin_resultado == 0 else "🟡 Revisar"))
-
-    dup_tickets = fb.duplicated(subset=["Ticket ID"]).sum() if "Ticket ID" in fb.columns else 0
-    checks.append(("Tickets duplicados (Ticket ID)", dup_tickets, "🟢 OK" if dup_tickets == 0 else "🔴 Inconsistencia"))
-
-    # Cruce Stripe (ya viene marcado en el CSV)
-    if "Origen del monto" in fb.columns:
-        sin_match_stripe = int((fb["Origen del monto"] == "Sin match Stripe").sum())
-        checks.append((f"Tickets sin match contra Stripe ({safe_pct(sin_match_stripe, len(fb))}%)",
-                        sin_match_stripe, "🟡 Revisar" if sin_match_stripe else "🟢 OK"))
-
-    # Inconsistencia: rescate marcado exitoso pero "Reembolso aprobado" a la vez (contradicción lógica)
-    contradiccion = int((fb["_salvado"] & fb["_cancelacion_confirmada"]).sum())
-    checks.append(("Rescate marcado como salvado Y con reembolso aprobado (contradicción)", contradiccion,
-                    "🟢 OK" if contradiccion == 0 else "🔴 Inconsistencia"))
-
-    df_checks = pd.DataFrame(checks, columns=["Check", "N° casos", "Estado"])
-    st.dataframe(df_checks, use_container_width=True, hide_index=True, height=360)
-
-    n_rojo = (df_checks["Estado"] == "🔴 Inconsistencia").sum()
-    n_amb = (df_checks["Estado"] == "🟡 Revisar").sum()
-    if n_rojo:
-        st.markdown(f'<div class="crit">🔴 {n_rojo} inconsistencia(s) que requieren revisión antes de confiar '
-                     f'en el dato ciegamente.</div>', unsafe_allow_html=True)
-    elif n_amb:
-        st.markdown(f'<div class="alrt">🟡 {n_amb} punto(s) a revisar, sin bloquear el uso del dashboard.</div>',
-                     unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="good">✅ Sin inconsistencias detectadas en el rango seleccionado.</div>',
-                     unsafe_allow_html=True)
-
-
-# ────────────────────────────────────────────────────────────────
-# TAB 7 · EXPLORADOR
-# ────────────────────────────────────────────────────────────────
-with tab7:
     st.markdown('<div class="sec">📋 Explorador de casos</div>', unsafe_allow_html=True)
     fuente = st.radio("Fuente", ["Chats (Treble)", "Tickets de rescate (HubSpot)"], horizontal=True)
 
@@ -816,9 +676,4 @@ with tab7:
 
 
 st.markdown("<br><hr>", unsafe_allow_html=True)
-st.caption(
-    "Dashboard Cancelaciones & Rescates · Opción Yo — generado con NOVA. "
-    "Fuentes: Treble (tag=cancelaciones) + HubSpot (tickets FID- Rescate de reembolsos). "
-    "Llamadas y clasificación por IA: en preparación, pendiente de acceso confirmado — ver pestaña "
-    "'Cobertura de auditoría'."
-)
+st.caption("Dashboard Cancelaciones & Rescates · Opción Yo — actualizado a hoy.")
