@@ -648,6 +648,16 @@ with tab4:
             disp[c] = disp[c].apply(lambda v: fmt_usd(v) if pd.notna(v) else "–")
     st.dataframe(disp, use_container_width=True, hide_index=True, height=340)
 
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<span class="sec dark">Carga operativa por agente (Treble)</span>', unsafe_allow_html=True)
+    cols_op = ["Agente", "Casos_chat", "Casos_transferidos", "Tiempo_medio", "Tiempo_mediana", "Tiempo_P90"]
+    disp_op = tabla[[c for c in cols_op if c in tabla.columns]].copy()
+    disp_op["% Transferidos"] = (disp_op["Casos_transferidos"] / disp_op["Casos_chat"] * 100).round(1)
+    for c in ["Tiempo_medio", "Tiempo_mediana", "Tiempo_P90"]:
+        if c in disp_op.columns:
+            disp_op[c] = disp_op[c].apply(fmt_min)
+    st.dataframe(disp_op, use_container_width=True, hide_index=True, height=340)
+
     c1, c2 = st.columns(2)
     with c1:
         plot_df = fin_ag[fin_ag["Casos_ticket"] >= 5].sort_values("Tasa efectiva %", ascending=True)
